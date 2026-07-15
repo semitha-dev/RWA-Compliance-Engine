@@ -1,0 +1,16 @@
+.anchor
+.DS_Store
+target
+node_modules
+dist
+build
+test-ledger
+.yarn
+
+# Keypairs — never commit real ones. Only test-fixture keypairs belong here,
+# and even those should be generated fresh rather than reused.
+**/*.json
+!package.json
+!tsconfig.json
+!Anchor.toml
+!.github/**/*.json

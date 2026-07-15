@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # Agave 3.x hard-asserts io_uring support (`io_uring_supported()` in fs/src/dirs.rs),
+  # which GitHub-hosted runners' kernels block. solana-test-validator panics instantly
+  # on 3.x here. Pinning 2.1.21 is CLI/validator-only and has no effect on program code
+  # or the SPL crate versions used on-chain. See anza-xyz/agave#10481.
+  AGAVE_VERSION: 2.1.21
+  ANCHOR_VERSION: 0.31.1
+  NODE_VERSION: 20
+  RUST_TOOLCHAIN: 1.82.0
+
+jobs:
+  build:
+    name: anchor build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: anchor-build
+          cache-on-failure: true
+
+      - name: Install Agave CLI (Solana toolchain)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${{ env.AGAVE_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor CLI via AVM
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install ${{ env.ANCHOR_VERSION }}
+          avm use ${{ env.ANCHOR_VERSION }}
+
+      - name: Pin transitive deps known to break cargo-build-sbf's bundled rustc
+        run: |
+          cargo generate-lockfile
+          cargo update -p blake3 --precise 1.8.2 || true
+          cargo update -p indexmap --precise 2.11.4 || true
+
+      - name: anchor build
+        run: anchor build
+
+      - name: Upload program artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anchor-build-artifacts
+          path: |
+            target/deploy/*.so
+            target/idl/*.json
+          retention-days: 14
+
+  test:
+    name: anchor test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: anchor-build
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Agave CLI (Solana toolchain)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${{ env.AGAVE_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor CLI via AVM
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install ${{ env.ANCHOR_VERSION }}
+          avm use ${{ env.ANCHOR_VERSION }}
+
+      - name: Pin transitive deps known to break cargo-build-sbf's bundled rustc
+        run: |
+          cargo generate-lockfile
+          cargo update -p blake3 --precise 1.8.2 || true
+          cargo update -p indexmap --precise 2.11.4 || true
+
+      - name: Generate local wallet keypair
+        run: solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: anchor test (spins up solana-test-validator)
+        run: anchor test

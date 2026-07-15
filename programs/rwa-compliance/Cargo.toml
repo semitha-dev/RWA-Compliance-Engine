@@ -1,0 +1,25 @@
+[package]
+name = "rwa-compliance"
+version = "0.1.0"
+description = "On-chain compliance registry and control plane for RWA security tokens"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "rwa_compliance"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.31.1"
+anchor-spl = { version = "0.31.1", features = ["token_2022"] }
+
+[dev-dependencies]
+
+[profile.release]
+overflow-checks = true
